@@ -81,6 +81,8 @@ Ubuntu 23.04 x86_64 6.2.0-39-generic
 ![Iteration Throughput](benchmarks/charts/iteration_throughput.png)
 
 
+**Apache Kafka is a trademark of the Apache Software Foundation.**
+
 **This project/product is not affiliated with, endorsed by, or sponsored by the Apache Software Foundation.**
 
 Licensed under Mozilla Public License 2.0
