@@ -1,0 +1,6 @@
+Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
+Range Scan,10,0,2,Infinity
+Range Scan,100,1,0,0.00
+Range Scan,1000,1,2,2.00
+Range Scan,5000,5,4,0.80
+Range Scan,10000,5,5,1.00
