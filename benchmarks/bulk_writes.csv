@@ -1,0 +1,5 @@
+Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
+Bulk Writes,1000,1,5,5.00
+Bulk Writes,5000,4,15,3.75
+Bulk Writes,10000,8,26,3.25
+Bulk Writes,50000,66,113,1.71

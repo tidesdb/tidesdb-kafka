@@ -1,0 +1,5 @@
+Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
+Full Iteration,1000,2,1,0.50
+Full Iteration,5000,2,2,1.00
+Full Iteration,10000,4,4,1.00
+Full Iteration,50000,16,13,0.81

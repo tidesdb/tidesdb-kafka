@@ -1,0 +1,5 @@
+Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
+Large Values,100,1,3,3.00
+Large Values,500,5,10,2.00
+Large Values,1000,9,19,2.11
+Large Values,5000,50,80,1.60

@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential git
+
+    - name: Build and install TidesDB native library
+      run: |
+        git clone --depth 1 https://github.com/tidesdb/tidesdb.git /tmp/tidesdb
+        cd /tmp/tidesdb
+        cmake -S . -B build
+        cmake --build build
+        sudo cmake --install build
+        sudo ldconfig
+
+    - name: Build and install TidesDB Java library
+      run: |
+        TIDESDB_JAVA_VERSION=$(curl -s https://api.github.com/repos/tidesdb/tidesdb-java/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+        git clone --depth 1 --branch "v${TIDESDB_JAVA_VERSION}" https://github.com/tidesdb/tidesdb-java.git /tmp/tidesdb-java
+        cd /tmp/tidesdb-java
+        
+        # Build JNI library
+        cd src/main/c
+        cmake -S . -B build
+        cmake --build build
+        sudo cmake --install build
+        cd ../../..
+        
+        # Install to Maven local repo
+        mvn clean install -DskipTests -Denforcer.skip=true -Dmaven.javadoc.skip=true
+        sudo ldconfig
+
+    - name: Get version from tag
+      id: get_version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Update version in pom.xml
+      run: mvn versions:set -DnewVersion=${{ steps.get_version.outputs.VERSION }} -B
+
+    - name: Build and test
+      run: |
+        mvn clean verify -DargLine="-Djava.library.path=/usr/local/lib" -B
+
+    - name: Package JAR
+      run: mvn package -DskipTests -B
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          target/tidesdb-kafka-streams-*.jar
+        generate_release_notes: true
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

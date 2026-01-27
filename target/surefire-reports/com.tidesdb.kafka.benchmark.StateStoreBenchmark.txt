@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: com.tidesdb.kafka.benchmark.StateStoreBenchmark
+-------------------------------------------------------------------------------
+Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 37.988 s - in com.tidesdb.kafka.benchmark.StateStoreBenchmark
