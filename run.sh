@@ -21,17 +21,27 @@ echo
 RUN_TESTS=false
 RUN_BENCHMARKS=false
 GENERATE_CHARTS=false
+DATA_DIR=""
 
-if [ $# -eq 0 ]; then
+show_usage() {
     echo "Usage: $0 [options]"
     echo
     echo "Options:"
-    echo "  -t, --tests        Run unit tests"
-    echo "  -b, --benchmarks   Run benchmarks"
-    echo "  -c, --charts       Generate charts from benchmark data"
-    echo "  -a, --all          Run everything"
-    echo "  -h, --help         Show this help message"
+    echo "  -t, --tests            Run unit tests"
+    echo "  -b, --benchmarks       Run benchmarks"
+    echo "  -c, --charts           Generate charts from benchmark data"
+    echo "  -a, --all              Run everything"
+    echo "  -d, --data-dir <path>  Set data directory for benchmark databases"
+    echo "  -h, --help             Show this help message"
     echo
+    echo "Examples:"
+    echo "  $0 -b                          # Run benchmarks with temp directory"
+    echo "  $0 -b -d /mnt/fast-ssd/bench   # Run benchmarks on fast SSD"
+    echo
+}
+
+if [ $# -eq 0 ]; then
+    show_usage
     exit 0
 fi
 
@@ -45,6 +55,14 @@ while [[ $# -gt 0 ]]; do
             RUN_BENCHMARKS=true
             shift
             ;;
+        -d|--data-dir)
+            if [ -z "$2" ] || [[ "$2" == -* ]]; then
+                echo -e "${RED}Error: --data-dir requires a path argument${NC}"
+                exit 1
+            fi
+            DATA_DIR="$2"
+            shift 2
+            ;;
         -c|--charts)
             GENERATE_CHARTS=true
             shift
@@ -56,14 +74,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         -h|--help)
-            echo "Usage: $0 [options]"
-            echo
-            echo "Options:"
-            echo "  -t, --tests        Run unit tests"
-            echo "  -b, --benchmarks   Run benchmarks"
-            echo "  -c, --charts       Generate charts from benchmark data"
-            echo "  -a, --all          Run everything"
-            echo "  -h, --help         Show this help message"
+            show_usage
             exit 0
             ;;
         *)
@@ -121,7 +132,14 @@ if [ "$RUN_BENCHMARKS" = true ]; then
     echo -e "${YELLOW} Note: Benchmarks may take 10-20 minutes to complete${NC}"
     echo
     
-    mvn test -Dtest=StateStoreBenchmark -DargLine="-Djava.library.path=/usr/local/lib"
+    # Build JVM args with library path and optional data directory
+    JVM_ARGS="-Djava.library.path=/usr/local/lib"
+    if [ -n "$DATA_DIR" ]; then
+        echo -e "   Data directory: ${BLUE}${DATA_DIR}${NC}"
+        JVM_ARGS="$JVM_ARGS -Dbenchmark.data.dir=$DATA_DIR"
+    fi
+    
+    mvn test -Dtest=StateStoreBenchmark -DargLine="$JVM_ARGS"
     
     if [ $? -eq 0 ]; then
         echo

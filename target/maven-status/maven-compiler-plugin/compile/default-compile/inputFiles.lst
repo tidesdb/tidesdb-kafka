@@ -1,5 +1,0 @@
-/home/agpmastersystem/bi/tidesdb-kafka/src/main/java/com/tidesdb/kafka/store/TidesDBStoreBuilder.java
-/home/agpmastersystem/bi/tidesdb-kafka/src/main/java/com/tidesdb/kafka/store/TidesDBRangeIterator.java
-/home/agpmastersystem/bi/tidesdb-kafka/src/main/java/com/tidesdb/kafka/store/TidesDBIteratorWrapper.java
-/home/agpmastersystem/bi/tidesdb-kafka/src/main/java/com/tidesdb/kafka/store/TidesDBStoreSupplier.java
-/home/agpmastersystem/bi/tidesdb-kafka/src/main/java/com/tidesdb/kafka/store/TidesDBStore.java

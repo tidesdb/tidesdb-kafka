@@ -45,9 +45,11 @@ public class StateStoreBenchmark {
     @TempDir
     File tempDir;
 
+    private File dataDir;
     private StateStoreContext context;
     private final Random random = new Random(42);
     private static final String TIMESTAMP = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+    private static final String DATA_DIR_PROPERTY = System.getProperty("benchmark.data.dir");
     
     // Extended benchmark configuration
     private static final int WARMUP_ITERATIONS = 3;
@@ -61,13 +63,37 @@ public class StateStoreBenchmark {
 
     @BeforeEach
     void setUp() {
+        // Use custom data directory if specified, otherwise use JUnit's temp directory
+        if (DATA_DIR_PROPERTY != null && !DATA_DIR_PROPERTY.isEmpty()) {
+            dataDir = new File(DATA_DIR_PROPERTY);
+            dataDir.mkdirs();
+            System.out.println("Using custom data directory: " + dataDir.getAbsolutePath());
+        } else {
+            dataDir = tempDir;
+        }
         context = mock(StateStoreContext.class);
-        when(context.stateDir()).thenReturn(tempDir);
+        when(context.stateDir()).thenReturn(dataDir);
     }
 
     @AfterEach
     void tearDown() {
-        // Cleanup is handled by @TempDir
+        // When using a custom data dir, clean up between runs to avoid stale data
+        if (DATA_DIR_PROPERTY != null && !DATA_DIR_PROPERTY.isEmpty() && dataDir != null && dataDir.exists()) {
+            deleteDirectory(dataDir);
+        }
+        // Otherwise cleanup is handled by @TempDir
+    }
+
+    private void deleteDirectory(File dir) {
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory()) {
+                    deleteDirectory(f);
+                }
+                f.delete();
+            }
+        }
     }
 
     @Test
@@ -76,7 +102,8 @@ public class StateStoreBenchmark {
         System.out.println("Configuration:");
         System.out.println("  Warmup iterations: " + WARMUP_ITERATIONS);
         System.out.println("  Measurement iterations: " + MEASUREMENT_ITERATIONS);
-        System.out.println("  Large dataset sizes: up to 1M keys");
+        System.out.println("  Large dataset sizes: up to 25M keys");
+        System.out.println("  Data directory: " + dataDir.getAbsolutePath());
         System.out.println();
 
         // Run all benchmark scenarios
@@ -1024,7 +1051,7 @@ public class StateStoreBenchmark {
                 // Disable sync for fair comparison with TidesDB (SYNC_NONE)
                 // By default RocksDB doesn't sync, but we explicitly set WriteOptions in put()
                 .setParanoidChecks(false);
-            String dbPath = new File(tempDir, name).getAbsolutePath();
+            String dbPath = new File(dataDir, name).getAbsolutePath();
             RocksDB db = RocksDB.open(options, dbPath);
             return new RocksDBWrapper(db, options);
         } catch (RocksDBException e) {

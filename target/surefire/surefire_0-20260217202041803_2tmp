@@ -1,6 +1,0 @@
-#surefire_0
-#Tue Feb 17 20:20:41 EST 2026
-basedir=/home/agpmastersystem/bi/tidesdb-kafka
-test=StateStoreBenchmark
-argLine=-Djava.library.path\=/usr/local/lib
-localRepository=/home/agpmastersystem/.m2/repository
