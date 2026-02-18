@@ -1,6 +1,0 @@
-Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
-Random Writes,1000,4,6,1.50
-Random Writes,5000,15,23,1.53
-Random Writes,10000,32,43,1.34
-Random Writes,50000,157,173,1.10
-Random Writes,100000,295,335,1.14

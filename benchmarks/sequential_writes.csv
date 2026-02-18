@@ -1,6 +1,0 @@
-Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
-Sequential Writes,1000,19,9,0.47
-Sequential Writes,5000,21,21,1.00
-Sequential Writes,10000,30,39,1.30
-Sequential Writes,50000,130,160,1.23
-Sequential Writes,100000,255,304,1.19

@@ -1,10 +1,14 @@
-com/tidesdb/kafka/benchmark/StateStoreBenchmark$RocksDBRangeIterator.class
-com/tidesdb/kafka/examples/WordCountExample$UserActivityAggregator.class
 com/tidesdb/kafka/examples/WordCountExample.class
 com/tidesdb/kafka/benchmark/StateStoreBenchmark.class
 com/tidesdb/kafka/examples/WordCountExample$1.class
-com/tidesdb/kafka/examples/WordCountExample$UserStatsSerde.class
 com/tidesdb/kafka/store/TidesDBStoreTest.class
 com/tidesdb/kafka/examples/WordCountExample$UserStats.class
 com/tidesdb/kafka/benchmark/StateStoreBenchmark$RocksDBWrapper.class
 com/tidesdb/kafka/benchmark/StateStoreBenchmark$BenchmarkResult.class
+com/tidesdb/kafka/benchmark/StateStoreBenchmark$RocksDBRangeIterator.class
+com/tidesdb/kafka/examples/WordCountExample$UserActivityAggregator.class
+com/tidesdb/kafka/benchmark/StateStoreBenchmark$ExtendedBenchmarkResult.class
+com/tidesdb/kafka/benchmark/StateStoreBenchmark$ConcurrentBenchmarkResult.class
+com/tidesdb/kafka/examples/WordCountExample$UserStatsSerde.class
+com/tidesdb/kafka/benchmark/StateStoreBenchmark$MetricsBenchmarkResult.class
+com/tidesdb/kafka/benchmark/StateStoreBenchmark$CompactionBenchmarkResult.class

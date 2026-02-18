@@ -1,6 +1,0 @@
-Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
-Sequential Reads,1000,2,2,1.00
-Sequential Reads,5000,5,6,1.20
-Sequential Reads,10000,10,12,1.20
-Sequential Reads,50000,49,59,1.20
-Sequential Reads,100000,85,107,1.26
