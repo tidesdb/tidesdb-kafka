@@ -192,12 +192,11 @@ public class TidesDBStore implements KeyValueStore<Bytes, byte[]> {
 
             // Create or get default column family
             ColumnFamilyConfig cfConfig = ColumnFamilyConfig.builder()
-                .writeBufferSize(128 * 1024 * 1024) // 128MB
+                .writeBufferSize(64 * 1024 * 1024) // 128MB
                 .compressionAlgorithm(CompressionAlgorithm.LZ4_COMPRESSION)
                 .enableBloomFilter(true)
                 .bloomFPR(0.01)
-                .syncMode(SyncMode.SYNC_INTERVAL)
-                .syncIntervalUs(100000) // 100ms
+                .syncMode(SyncMode.SYNC_NONE)
                 .build();
 
             try {

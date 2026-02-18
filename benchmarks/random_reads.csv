@@ -1,6 +1,0 @@
-Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
-Random Reads,1000,1,2,2.00
-Random Reads,5000,6,6,1.00
-Random Reads,10000,15,13,0.87
-Random Reads,50000,77,67,0.87
-Random Reads,100000,143,157,1.10

@@ -18,12 +18,20 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.OperatingSystemMXBean;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -37,24 +45,66 @@ public class StateStoreBenchmark {
     @TempDir
     File tempDir;
 
+    private File dataDir;
     private StateStoreContext context;
     private final Random random = new Random(42);
     private static final String TIMESTAMP = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
+    private static final String DATA_DIR_PROPERTY = System.getProperty("benchmark.data.dir");
+    
+    // Extended benchmark configuration
+    private static final int WARMUP_ITERATIONS = 3;
+    private static final int MEASUREMENT_ITERATIONS = 5;
+    private static final int[] LARGE_SIZES = {100000, 500000, 1000000, 5000000, 10000000, 25000000};
+    private static final int[] CONCURRENT_THREAD_COUNTS = {1, 2, 4, 8, 16};
+    
+    // Memory and CPU monitoring
+    private final MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
+    private final OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
 
     @BeforeEach
     void setUp() {
+        // Use custom data directory if specified, otherwise use JUnit's temp directory
+        if (DATA_DIR_PROPERTY != null && !DATA_DIR_PROPERTY.isEmpty()) {
+            dataDir = new File(DATA_DIR_PROPERTY);
+            dataDir.mkdirs();
+            System.out.println("Using custom data directory: " + dataDir.getAbsolutePath());
+        } else {
+            dataDir = tempDir;
+        }
         context = mock(StateStoreContext.class);
-        when(context.stateDir()).thenReturn(tempDir);
+        when(context.stateDir()).thenReturn(dataDir);
     }
 
     @AfterEach
     void tearDown() {
-        // Cleanup is handled by @TempDir
+        // When using a custom data dir, clean up between runs to avoid stale data
+        if (DATA_DIR_PROPERTY != null && !DATA_DIR_PROPERTY.isEmpty() && dataDir != null && dataDir.exists()) {
+            deleteDirectory(dataDir);
+        }
+        // Otherwise cleanup is handled by @TempDir
+    }
+
+    private void deleteDirectory(File dir) {
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File f : files) {
+                if (f.isDirectory()) {
+                    deleteDirectory(f);
+                }
+                f.delete();
+            }
+        }
     }
 
     @Test
-    public void runAllBenchmarks() throws IOException {
+    public void runAllBenchmarks() throws IOException, InterruptedException {
         System.out.println("Starting comprehensive benchmarks...\n");
+        System.out.println("Configuration:");
+        System.out.println("  Warmup iterations: " + WARMUP_ITERATIONS);
+        System.out.println("  Measurement iterations: " + MEASUREMENT_ITERATIONS);
+        System.out.println("  Large dataset sizes: up to 25M keys");
+        System.out.println("  Data directory: " + dataDir.getAbsolutePath());
+        System.out.println();
 
         // Run all benchmark scenarios
         benchmarkSequentialWrites();
@@ -67,6 +117,12 @@ public class StateStoreBenchmark {
         benchmarkUpdateWorkload();
         benchmarkLargeValues();
         benchmarkIterationPerformance();
+        
+        // Extended benchmarks
+        benchmarkLargeDatasets();
+        benchmarkConcurrentAccess();
+        benchmarkCompactionPressure();
+        benchmarkWithMetrics();
 
         System.out.println("\nAll benchmarks completed!");
         System.out.println("CSV files generated in: " + new File("benchmarks").getAbsolutePath());
@@ -363,6 +419,469 @@ public class StateStoreBenchmark {
         writeCsv("benchmarks/iteration_" + TIMESTAMP + ".csv", results);
     }
 
+    // ==================== EXTENDED BENCHMARKS ====================
+
+    /**
+     * Benchmark with large datasets (up to 1M keys) with warmup
+     */
+    private void benchmarkLargeDatasets() throws IOException {
+        System.out.println("\n=== EXTENDED: Large Dataset Benchmark (with warmup) ===");
+        
+        List<ExtendedBenchmarkResult> results = new ArrayList<>();
+
+        for (int size : LARGE_SIZES) {
+            System.out.printf("\nTesting %,d keys...%n", size);
+            
+            // Warmup phase
+            System.out.println("  Warming up...");
+            for (int w = 0; w < WARMUP_ITERATIONS; w++) {
+                KeyValueStore<Bytes, byte[]> warmupStore = createTidesDBStore("warmup-tides-" + w);
+                measureSequentialWrites(warmupStore, Math.min(size / 10, 10000));
+                warmupStore.close();
+            }
+            
+            // Measurement phase - multiple iterations
+            long[] tidesTimes = new long[MEASUREMENT_ITERATIONS];
+            long[] rocksTimes = new long[MEASUREMENT_ITERATIONS];
+            
+            for (int iter = 0; iter < MEASUREMENT_ITERATIONS; iter++) {
+                // TidesDB
+                KeyValueStore<Bytes, byte[]> tidesStore = createTidesDBStore("large-tides-" + iter);
+                tidesTimes[iter] = measureSequentialWrites(tidesStore, size);
+                tidesStore.close();
+
+                // RocksDB
+                KeyValueStore<Bytes, byte[]> rocksStore = createRocksDBStore("large-rocks-" + iter);
+                rocksTimes[iter] = measureSequentialWrites(rocksStore, size);
+                rocksStore.close();
+            }
+            
+            // Calculate statistics
+            long tidesAvg = average(tidesTimes);
+            long rocksAvg = average(rocksTimes);
+            long tidesStdDev = stdDev(tidesTimes);
+            long rocksStdDev = stdDev(rocksTimes);
+            
+            results.add(new ExtendedBenchmarkResult(
+                "Large Dataset Writes", size, tidesAvg, rocksAvg, tidesStdDev, rocksStdDev
+            ));
+
+            System.out.printf("  %,d keys: TidesDB=%dms (±%d), RocksDB=%dms (±%d), Speedup=%.2fx%n",
+                size, tidesAvg, tidesStdDev, rocksAvg, rocksStdDev, (double) rocksAvg / tidesAvg);
+        }
+
+        writeExtendedCsv("benchmarks/large_datasets_" + TIMESTAMP + ".csv", results);
+    }
+
+    /**
+     * Benchmark concurrent/multi-threaded access
+     */
+    private void benchmarkConcurrentAccess() throws IOException, InterruptedException {
+        System.out.println("\n=== EXTENDED: Concurrent Access Benchmark ===");
+        
+        int dataSize = 100000;
+        int opsPerThread = 10000;
+        List<ConcurrentBenchmarkResult> results = new ArrayList<>();
+
+        for (int threadCount : CONCURRENT_THREAD_COUNTS) {
+            System.out.printf("\nTesting with %d threads...%n", threadCount);
+            
+            // TidesDB concurrent test
+            KeyValueStore<Bytes, byte[]> tidesStore = createTidesDBStore("concurrent-tides");
+            populateSequential(tidesStore, dataSize);
+            long tidesTime = measureConcurrentMixedWorkload(tidesStore, dataSize, opsPerThread, threadCount);
+            long tidesThroughput = (long) ((threadCount * opsPerThread) / (tidesTime / 1000.0));
+            tidesStore.close();
+
+            // RocksDB concurrent test
+            KeyValueStore<Bytes, byte[]> rocksStore = createRocksDBStore("concurrent-rocks");
+            populateSequential(rocksStore, dataSize);
+            long rocksTime = measureConcurrentMixedWorkload(rocksStore, dataSize, opsPerThread, threadCount);
+            long rocksThroughput = (long) ((threadCount * opsPerThread) / (rocksTime / 1000.0));
+            rocksStore.close();
+
+            results.add(new ConcurrentBenchmarkResult(
+                "Concurrent Mixed", threadCount, threadCount * opsPerThread,
+                tidesTime, rocksTime, tidesThroughput, rocksThroughput
+            ));
+
+            System.out.printf("  %d threads: TidesDB=%dms (%,d ops/s), RocksDB=%dms (%,d ops/s)%n",
+                threadCount, tidesTime, tidesThroughput, rocksTime, rocksThroughput);
+        }
+
+        writeConcurrentCsv("benchmarks/concurrent_access_" + TIMESTAMP + ".csv", results);
+    }
+
+    /**
+     * Benchmark with compaction pressure (accumulated data over time)
+     */
+    private void benchmarkCompactionPressure() throws IOException {
+        System.out.println("\n=== EXTENDED: Compaction Pressure Benchmark ===");
+        
+        int batchSize = 50000;
+        int numBatches = 5;
+        List<CompactionBenchmarkResult> results = new ArrayList<>();
+
+        // TidesDB - accumulate data over multiple batches
+        System.out.println("\nTidesDB compaction pressure test...");
+        KeyValueStore<Bytes, byte[]> tidesStore = createTidesDBStore("compaction-tides");
+        for (int batch = 1; batch <= numBatches; batch++) {
+            int startKey = (batch - 1) * batchSize;
+            long writeTime = measureSequentialWritesWithOffset(tidesStore, batchSize, startKey);
+            long readTime = measureRandomReads(tidesStore, batch * batchSize, batchSize);
+            
+            results.add(new CompactionBenchmarkResult(
+                "TidesDB", batch, batch * batchSize, writeTime, readTime
+            ));
+            
+            System.out.printf("  Batch %d (%,d total keys): write=%dms, read=%dms%n",
+                batch, batch * batchSize, writeTime, readTime);
+        }
+        tidesStore.close();
+
+        // RocksDB - accumulate data over multiple batches
+        System.out.println("\nRocksDB compaction pressure test...");
+        KeyValueStore<Bytes, byte[]> rocksStore = createRocksDBStore("compaction-rocks");
+        for (int batch = 1; batch <= numBatches; batch++) {
+            int startKey = (batch - 1) * batchSize;
+            long writeTime = measureSequentialWritesWithOffset(rocksStore, batchSize, startKey);
+            long readTime = measureRandomReads(rocksStore, batch * batchSize, batchSize);
+            
+            results.add(new CompactionBenchmarkResult(
+                "RocksDB", batch, batch * batchSize, writeTime, readTime
+            ));
+            
+            System.out.printf("  Batch %d (%,d total keys): write=%dms, read=%dms%n",
+                batch, batch * batchSize, writeTime, readTime);
+        }
+        rocksStore.close();
+
+        writeCompactionCsv("benchmarks/compaction_pressure_" + TIMESTAMP + ".csv", results);
+    }
+
+    /**
+     * Benchmark with memory and CPU metrics
+     */
+    private void benchmarkWithMetrics() throws IOException {
+        System.out.println("\n=== EXTENDED: Benchmark with Memory/CPU Metrics ===");
+        
+        int[] sizes = {10000, 50000, 100000, 250000};
+        List<MetricsBenchmarkResult> results = new ArrayList<>();
+
+        for (int size : sizes) {
+            System.out.printf("\nTesting %,d keys with metrics...%n", size);
+            
+            // Force GC before measurement
+            System.gc();
+            try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            
+            // TidesDB with metrics
+            long tidesMemBefore = getUsedMemory();
+            double tidesCpuBefore = getProcessCpuLoad();
+            
+            KeyValueStore<Bytes, byte[]> tidesStore = createTidesDBStore("metrics-tides");
+            long tidesWriteTime = measureSequentialWrites(tidesStore, size);
+            long tidesReadTime = measureRandomReads(tidesStore, size, size);
+            
+            long tidesMemAfter = getUsedMemory();
+            double tidesCpuAfter = getProcessCpuLoad();
+            long tidesMemUsed = tidesMemAfter - tidesMemBefore;
+            tidesStore.close();
+            
+            // Force GC before RocksDB
+            System.gc();
+            try { Thread.sleep(100); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            
+            // RocksDB with metrics
+            long rocksMemBefore = getUsedMemory();
+            double rocksCpuBefore = getProcessCpuLoad();
+            
+            KeyValueStore<Bytes, byte[]> rocksStore = createRocksDBStore("metrics-rocks");
+            long rocksWriteTime = measureSequentialWrites(rocksStore, size);
+            long rocksReadTime = measureRandomReads(rocksStore, size, size);
+            
+            long rocksMemAfter = getUsedMemory();
+            double rocksCpuAfter = getProcessCpuLoad();
+            long rocksMemUsed = rocksMemAfter - rocksMemBefore;
+            rocksStore.close();
+
+            results.add(new MetricsBenchmarkResult(
+                "With Metrics", size,
+                tidesWriteTime, tidesReadTime, tidesMemUsed, (tidesCpuBefore + tidesCpuAfter) / 2,
+                rocksWriteTime, rocksReadTime, rocksMemUsed, (rocksCpuBefore + rocksCpuAfter) / 2
+            ));
+
+            System.out.printf("  TidesDB: write=%dms, read=%dms, mem=%,dKB%n",
+                tidesWriteTime, tidesReadTime, tidesMemUsed / 1024);
+            System.out.printf("  RocksDB: write=%dms, read=%dms, mem=%,dKB%n",
+                rocksWriteTime, rocksReadTime, rocksMemUsed / 1024);
+        }
+
+        writeMetricsCsv("benchmarks/metrics_" + TIMESTAMP + ".csv", results);
+    }
+
+    // ==================== EXTENDED HELPER METHODS ====================
+
+    private long measureConcurrentMixedWorkload(KeyValueStore<Bytes, byte[]> store, int dataSize, 
+                                                 int opsPerThread, int threadCount) throws InterruptedException {
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startLatch = new CountDownLatch(1);
+        CountDownLatch doneLatch = new CountDownLatch(threadCount);
+        AtomicLong totalOps = new AtomicLong(0);
+
+        for (int t = 0; t < threadCount; t++) {
+            final int threadId = t;
+            executor.submit(() -> {
+                try {
+                    Random threadRandom = new Random(42 + threadId);
+                    startLatch.await(); // Wait for all threads to be ready
+                    
+                    for (int i = 0; i < opsPerThread; i++) {
+                        int idx = threadRandom.nextInt(dataSize);
+                        String key = String.format("key_%08d", idx);
+                        
+                        if (threadRandom.nextBoolean()) {
+                            store.get(Bytes.wrap(key.getBytes(StandardCharsets.UTF_8)));
+                        } else {
+                            String value = String.format("value_%08d_%d", idx, threadId);
+                            store.put(
+                                Bytes.wrap(key.getBytes(StandardCharsets.UTF_8)),
+                                value.getBytes(StandardCharsets.UTF_8)
+                            );
+                        }
+                        totalOps.incrementAndGet();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    doneLatch.countDown();
+                }
+            });
+        }
+
+        long start = System.currentTimeMillis();
+        startLatch.countDown(); // Start all threads
+        doneLatch.await(5, TimeUnit.MINUTES); // Wait for completion
+        long elapsed = System.currentTimeMillis() - start;
+        
+        executor.shutdown();
+        executor.awaitTermination(10, TimeUnit.SECONDS);
+        
+        return elapsed;
+    }
+
+    private long measureSequentialWritesWithOffset(KeyValueStore<Bytes, byte[]> store, int count, int offset) {
+        long start = System.currentTimeMillis();
+        for (int i = 0; i < count; i++) {
+            String key = String.format("key_%08d", offset + i);
+            String value = String.format("value_%08d", offset + i);
+            store.put(
+                Bytes.wrap(key.getBytes(StandardCharsets.UTF_8)),
+                value.getBytes(StandardCharsets.UTF_8)
+            );
+        }
+        return System.currentTimeMillis() - start;
+    }
+
+    private long getUsedMemory() {
+        return memoryBean.getHeapMemoryUsage().getUsed() + 
+               memoryBean.getNonHeapMemoryUsage().getUsed();
+    }
+
+    private double getProcessCpuLoad() {
+        if (osBean instanceof com.sun.management.OperatingSystemMXBean) {
+            return ((com.sun.management.OperatingSystemMXBean) osBean).getProcessCpuLoad() * 100;
+        }
+        return -1;
+    }
+
+    private long average(long[] values) {
+        long sum = 0;
+        for (long v : values) sum += v;
+        return sum / values.length;
+    }
+
+    private long stdDev(long[] values) {
+        long avg = average(values);
+        long sumSquares = 0;
+        for (long v : values) {
+            sumSquares += (v - avg) * (v - avg);
+        }
+        return (long) Math.sqrt(sumSquares / values.length);
+    }
+
+    // ==================== EXTENDED RESULT CLASSES ====================
+
+    private static class ExtendedBenchmarkResult {
+        final String name;
+        final int size;
+        final long tidesAvg;
+        final long rocksAvg;
+        final long tidesStdDev;
+        final long rocksStdDev;
+
+        ExtendedBenchmarkResult(String name, int size, long tidesAvg, long rocksAvg, 
+                                long tidesStdDev, long rocksStdDev) {
+            this.name = name;
+            this.size = size;
+            this.tidesAvg = tidesAvg;
+            this.rocksAvg = rocksAvg;
+            this.tidesStdDev = tidesStdDev;
+            this.rocksStdDev = rocksStdDev;
+        }
+    }
+
+    private static class ConcurrentBenchmarkResult {
+        final String name;
+        final int threads;
+        final int totalOps;
+        final long tidesTime;
+        final long rocksTime;
+        final long tidesThroughput;
+        final long rocksThroughput;
+
+        ConcurrentBenchmarkResult(String name, int threads, int totalOps,
+                                   long tidesTime, long rocksTime,
+                                   long tidesThroughput, long rocksThroughput) {
+            this.name = name;
+            this.threads = threads;
+            this.totalOps = totalOps;
+            this.tidesTime = tidesTime;
+            this.rocksTime = rocksTime;
+            this.tidesThroughput = tidesThroughput;
+            this.rocksThroughput = rocksThroughput;
+        }
+    }
+
+    private static class CompactionBenchmarkResult {
+        final String store;
+        final int batch;
+        final int totalKeys;
+        final long writeTime;
+        final long readTime;
+
+        CompactionBenchmarkResult(String store, int batch, int totalKeys, 
+                                   long writeTime, long readTime) {
+            this.store = store;
+            this.batch = batch;
+            this.totalKeys = totalKeys;
+            this.writeTime = writeTime;
+            this.readTime = readTime;
+        }
+    }
+
+    private static class MetricsBenchmarkResult {
+        final String name;
+        final int size;
+        final long tidesWriteTime;
+        final long tidesReadTime;
+        final long tidesMemUsed;
+        final double tidesCpuAvg;
+        final long rocksWriteTime;
+        final long rocksReadTime;
+        final long rocksMemUsed;
+        final double rocksCpuAvg;
+
+        MetricsBenchmarkResult(String name, int size,
+                               long tidesWriteTime, long tidesReadTime, long tidesMemUsed, double tidesCpuAvg,
+                               long rocksWriteTime, long rocksReadTime, long rocksMemUsed, double rocksCpuAvg) {
+            this.name = name;
+            this.size = size;
+            this.tidesWriteTime = tidesWriteTime;
+            this.tidesReadTime = tidesReadTime;
+            this.tidesMemUsed = tidesMemUsed;
+            this.tidesCpuAvg = tidesCpuAvg;
+            this.rocksWriteTime = rocksWriteTime;
+            this.rocksReadTime = rocksReadTime;
+            this.rocksMemUsed = rocksMemUsed;
+            this.rocksCpuAvg = rocksCpuAvg;
+        }
+    }
+
+    // ==================== EXTENDED CSV WRITERS ====================
+
+    private void writeExtendedCsv(String filename, List<ExtendedBenchmarkResult> results) throws IOException {
+        File file = new File(filename);
+        file.getParentFile().mkdirs();
+
+        try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
+            writer.println("Benchmark,Size,TidesDB_avg_ms,RocksDB_avg_ms,TidesDB_stddev,RocksDB_stddev,Speedup");
+            for (ExtendedBenchmarkResult result : results) {
+                writer.printf("%s,%d,%d,%d,%d,%d,%.2f%n",
+                    result.name,
+                    result.size,
+                    result.tidesAvg,
+                    result.rocksAvg,
+                    result.tidesStdDev,
+                    result.rocksStdDev,
+                    (double) result.rocksAvg / result.tidesAvg
+                );
+            }
+        }
+    }
+
+    private void writeConcurrentCsv(String filename, List<ConcurrentBenchmarkResult> results) throws IOException {
+        File file = new File(filename);
+        file.getParentFile().mkdirs();
+
+        try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
+            writer.println("Benchmark,Threads,TotalOps,TidesDB_ms,RocksDB_ms,TidesDB_ops_sec,RocksDB_ops_sec,Speedup");
+            for (ConcurrentBenchmarkResult result : results) {
+                writer.printf("%s,%d,%d,%d,%d,%d,%d,%.2f%n",
+                    result.name,
+                    result.threads,
+                    result.totalOps,
+                    result.tidesTime,
+                    result.rocksTime,
+                    result.tidesThroughput,
+                    result.rocksThroughput,
+                    (double) result.rocksTime / result.tidesTime
+                );
+            }
+        }
+    }
+
+    private void writeCompactionCsv(String filename, List<CompactionBenchmarkResult> results) throws IOException {
+        File file = new File(filename);
+        file.getParentFile().mkdirs();
+
+        try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
+            writer.println("Store,Batch,TotalKeys,WriteTime_ms,ReadTime_ms");
+            for (CompactionBenchmarkResult result : results) {
+                writer.printf("%s,%d,%d,%d,%d%n",
+                    result.store,
+                    result.batch,
+                    result.totalKeys,
+                    result.writeTime,
+                    result.readTime
+                );
+            }
+        }
+    }
+
+    private void writeMetricsCsv(String filename, List<MetricsBenchmarkResult> results) throws IOException {
+        File file = new File(filename);
+        file.getParentFile().mkdirs();
+
+        try (PrintWriter writer = new PrintWriter(new FileWriter(file))) {
+            writer.println("Benchmark,Size,TidesDB_write_ms,TidesDB_read_ms,TidesDB_mem_bytes,TidesDB_cpu_pct,RocksDB_write_ms,RocksDB_read_ms,RocksDB_mem_bytes,RocksDB_cpu_pct");
+            for (MetricsBenchmarkResult result : results) {
+                writer.printf("%s,%d,%d,%d,%d,%.2f,%d,%d,%d,%.2f%n",
+                    result.name,
+                    result.size,
+                    result.tidesWriteTime,
+                    result.tidesReadTime,
+                    result.tidesMemUsed,
+                    result.tidesCpuAvg,
+                    result.rocksWriteTime,
+                    result.rocksReadTime,
+                    result.rocksMemUsed,
+                    result.rocksCpuAvg
+                );
+            }
+        }
+    }
+
     // Helper methods for measurements
 
     private long measureSequentialWrites(KeyValueStore<Bytes, byte[]> store, int count) {
@@ -527,8 +1046,12 @@ public class StateStoreBenchmark {
     private RocksDBWrapper createRocksDBStore(String name) {
         try {
             RocksDB.loadLibrary();
-            Options options = new Options().setCreateIfMissing(true);
-            String dbPath = new File(tempDir, name).getAbsolutePath();
+            Options options = new Options()
+                .setCreateIfMissing(true)
+                // Disable sync for fair comparison with TidesDB (SYNC_NONE)
+                // By default RocksDB doesn't sync, but we explicitly set WriteOptions in put()
+                .setParanoidChecks(false);
+            String dbPath = new File(dataDir, name).getAbsolutePath();
             RocksDB db = RocksDB.open(options, dbPath);
             return new RocksDBWrapper(db, options);
         } catch (RocksDBException e) {
@@ -542,20 +1065,23 @@ public class StateStoreBenchmark {
     private static class RocksDBWrapper implements KeyValueStore<Bytes, byte[]> {
         private final RocksDB db;
         private final Options options;
+        private final org.rocksdb.WriteOptions writeOptions;
         private boolean open = true;
 
         RocksDBWrapper(RocksDB db, Options options) {
             this.db = db;
             this.options = options;
+            // Explicitly disable sync for fair comparison with TidesDB SYNC_NONE
+            this.writeOptions = new org.rocksdb.WriteOptions().setSync(false).setDisableWAL(false);
         }
 
         @Override
         public void put(Bytes key, byte[] value) {
             try {
                 if (value == null) {
-                    db.delete(key.get());
+                    db.delete(writeOptions, key.get());
                 } else {
-                    db.put(key.get(), value);
+                    db.put(writeOptions, key.get(), value);
                 }
             } catch (RocksDBException e) {
                 throw new RuntimeException(e);
@@ -645,6 +1171,7 @@ public class StateStoreBenchmark {
         @Override
         public void close() {
             if (open) {
+                writeOptions.close();
                 db.close();
                 options.close();
                 open = false;

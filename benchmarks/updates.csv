@@ -1,5 +1,0 @@
-Benchmark,Size,TidesDB_ms,RocksDB_ms,Speedup
-Updates,1000,3,3,1.00
-Updates,5000,13,18,1.38
-Updates,10000,25,35,1.40
-Updates,50000,124,164,1.32

@@ -1,6 +1,0 @@
-com/tidesdb/kafka/store/TidesDBRangeIterator.class
-com/tidesdb/kafka/store/TidesDBIteratorWrapper.class
-com/tidesdb/kafka/store/TidesDBStore.class
-com/tidesdb/kafka/store/TidesDBStoreBuilder.class
-com/tidesdb/kafka/store/TidesDBStoreSupplier.class
-com/tidesdb/kafka/store/TidesDBRangeIterator$LexicographicComparator.class
