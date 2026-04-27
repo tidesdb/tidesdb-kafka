@@ -120,7 +120,7 @@ Both engines are configured with equivalent settings:
 - LZ4 on both
 - ~1% FPR on both (TidesDB 0.01 FPR, RocksDB 10 bits/key)
 - Block cache is 64 MB on both
-- **Write buffer is 64 MB on both
+- Write buffer is 64 MB on both
 - Background threads set to 4 on both (2 flush + 2 compaction)
 - Sync disabled on both (TidesDB `SYNC_NONE`, RocksDB `sync=false`)
 
