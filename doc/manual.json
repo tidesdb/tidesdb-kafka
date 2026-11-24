@@ -1,0 +1,19 @@
+{
+  "$comment": "Table of contents for the TidesDB Kafka Streams state store docs, read by the TidesDB website (rendered under /docs/<major>/bindings/<lang>/). The plugin version comes from this repo's release and is pinned per TidesDB major on the site — do not repeat it here. This currently points at the single reference page. To expand it, split the page into numbered part folders (e.g. 01-getting-started/, 02-guide/, 03-reference/) and list each part and chapter below; give each markdown file only 'title' and 'description' frontmatter — the website injects the slug.",
+  "title": "TidesDB Kafka Streams",
+  "tidesdb": "10.2.0",
+  "parts": [
+    {
+      "id": "reference",
+      "title": "Reference",
+      "dir": "",
+      "chapters": [
+        {
+          "file": "kafka.md",
+          "slug": "reference",
+          "title": "Kafka Streams State Store Reference"
+        }
+      ]
+    }
+  ]
+}

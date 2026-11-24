@@ -6,14 +6,13 @@ A drop-in replacement for RocksDB state stores in Kafka Streams applications, po
 ## Features
 
 - Swap RocksDB for TidesDB with a one-line change
-- Every TidesDB database and column family option exposed through `TidesDBStoreConfig`
+- Every TidesDB database and column family option reachable through `TidesDBStoreConfig`
 - Default TTL per store or per-key TTL via `putWithTtl()`
-- Optional B+tree SSTables for faster point lookups
+- Forward, reverse and prefix scans
 - Change data capture callbacks on every transaction commit
-- Online backup and near-instant hard-link checkpoints
-- Column family stats, database stats, and block cache stats
-- Tiered storage on a filesystem or S3-compatible object store (AWS S3, MinIO, GCS)
-- Change write buffer, bloom FPR, sync mode without restart
+- Online backup
+- Column family, database, block cache, write-stall and I/O stats
+- Change column family settings without restart
 - Pooled transaction with `reset()` to minimize allocation on the hot path
 
 ## Installation
@@ -39,8 +38,8 @@ KTable<String, Long> counts = input
 
 // Custom config
 TidesDBStoreConfig config = TidesDBStoreConfig.builder()
-    .compressionAlgorithm(CompressionAlgorithm.ZSTD_COMPRESSION)
-    .syncMode(SyncMode.SYNC_NONE)
+    .compression(CompressionAlgorithm.ZSTD)
+    .memtableSyncMode(SyncMode.SYNC_NONE)
     .enableBloomFilter(true)
     .blockCacheSize(128 * 1024 * 1024)
     .defaultTtlSeconds(3600)
@@ -51,7 +50,7 @@ KTable<String, Long> counts = input
     .count(Materialized.as(new TidesDBStoreSupplier("my-counts", config)));
 ```
 
-See [kafka.md](kafka.md) for the full reference documentation.
+Requires TidesDB 10.2.0+ and tidesdb-java 1.1.x, and must not run as root. See [doc/kafka.md](doc/kafka.md) for the full reference documentation, including migrating from 0.4.x.
 
 ## Running Tests and Benchmarks
 

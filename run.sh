@@ -100,7 +100,7 @@ if [ "$RUN_TESTS" = true ]; then
         exit 1
     fi
     
-    mvn test -Dtest=TidesDBStoreTest -DargLine="-Djava.library.path=/usr/local/lib"
+    mvn test -Dtest='TidesDBStoreTest,TidesDBStoreTopologyTest' -DargLine="-Djava.library.path=/usr/local/lib"
     
     if [ $? -eq 0 ]; then
         echo
