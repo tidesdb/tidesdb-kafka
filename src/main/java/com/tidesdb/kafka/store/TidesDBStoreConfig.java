@@ -1,332 +1,382 @@
 package com.tidesdb.kafka.store;
 
-import com.tidesdb.*;
+import com.tidesdb.ColumnFamilyConfig;
+import com.tidesdb.CompressionAlgorithm;
+import com.tidesdb.Config;
+import com.tidesdb.IsolationLevel;
+import com.tidesdb.LogLevel;
+import com.tidesdb.SyncMode;
 
 /**
  * Configuration for TidesDB-backed Kafka Streams state stores.
- * Allows fine-grained control over database and column family settings.
+ *
+ * <p>A store configuration is three things:
+ * <ul>
+ *   <li>a TidesDB database {@link Config} (threads, block cache, memtable,
+ *       write-ahead log, value log), applied when the store opens its database;</li>
+ *   <li>a {@link ColumnFamilyConfig} (compression, bloom filter, level shape,
+ *       isolation), applied when the store creates its column family;</li>
+ *   <li>store behaviour: the column family name, a default TTL, and an
+ *       optional open-file limit raise.</li>
+ * </ul>
+ *
+ * <p>Both TidesDB configurations start from the native library's own defaults
+ * ({@code tidesdb_default_config()} and
+ * {@code tidesdb_default_column_family_config()}). The one store-specific
+ * default is LZ4 compression on the column family. The common knobs have
+ * setters on {@link Builder}; anything else can be set by passing a full
+ * {@link Config} or {@link ColumnFamilyConfig} through
+ * {@link Builder#databaseConfig(Config)} and
+ * {@link Builder#columnFamilyConfig(ColumnFamilyConfig)}.
+ *
+ * <p>The database path is never taken from the {@link Config}; the store
+ * always opens its database under the Kafka Streams task state directory.
+ *
+ * <p>Instances are immutable.
  */
 public class TidesDBStoreConfig {
 
-    // Database-level settings
-    private final int numFlushThreads;
-    private final int numCompactionThreads;
-    private final LogLevel logLevel;
-    private final long blockCacheSize;
-    private final long maxOpenSSTables;
-    private final long maxMemoryUsage;
-    private final boolean logToFile;
-    private final long logTruncationAt;
-    private final int maxConcurrentFlushes;
-    private final long raiseOpenFileLimit;
-    private final boolean cancelBackgroundWorkOnClose;
-    private final boolean finishCompactionsOnClose;
+    /** The column family the store creates when none is named. */
+    public static final String DEFAULT_COLUMN_FAMILY_NAME = "default";
 
-    // Unified memtable settings
-    private final boolean unifiedMemtable;
-    private final long unifiedMemtableWriteBufferSize;
-    private final int unifiedMemtableSkipListMaxLevel;
-    private final float unifiedMemtableSkipListProbability;
-    private final int unifiedMemtableSyncMode;
-    private final long unifiedMemtableSyncIntervalUs;
+    /**
+     * The placeholder path the database configuration carries until the store
+     * opens. The real path is the task state directory joined with the store
+     * name.
+     */
+    static final String UNSET_PATH = "<state-dir>";
 
-    // Object store settings
-    private final String objectStoreFsPath;
-    private final ObjectStoreConfig objectStoreConfig;
-    private final S3Config objectStoreS3Config;
-
-    // Column family settings
-    private final long writeBufferSize;
-    private final CompressionAlgorithm compressionAlgorithm;
-    private final boolean enableBloomFilter;
-    private final double bloomFPR;
-    private final boolean enableBlockIndexes;
-    private final int indexSampleRatio;
-    private final int blockIndexPrefixLen;
-    private final SyncMode syncMode;
-    private final long syncIntervalUs;
-    private final boolean useBtree;
-    private final int minLevels;
-    private final long levelSizeRatio;
-    private final int skipListMaxLevel;
-    private final float skipListProbability;
-    private final IsolationLevel defaultIsolationLevel;
-    private final long klogValueThreshold;
-    private final int l0QueueStallThreshold;
-    private final int l1FileCountTrigger;
-    private final int dividingLevelOffset;
-    private final long minDiskSpace;
-    private final String comparatorName;
-    private final double tombstoneDensityTrigger;
-    private final long tombstoneDensityMinEntries;
-    private final boolean objectLazyCompaction;
-    private final boolean objectPrefetchCompaction;
-
-    // Store behavior
+    private final Config databaseConfig;
+    private final ColumnFamilyConfig columnFamilyConfig;
     private final String columnFamilyName;
     private final long defaultTtlSeconds;
+    private final long raiseOpenFileLimit;
 
     private TidesDBStoreConfig(Builder builder) {
-        this.numFlushThreads = builder.numFlushThreads;
-        this.numCompactionThreads = builder.numCompactionThreads;
-        this.logLevel = builder.logLevel;
-        this.blockCacheSize = builder.blockCacheSize;
-        this.maxOpenSSTables = builder.maxOpenSSTables;
-        this.maxMemoryUsage = builder.maxMemoryUsage;
-        this.logToFile = builder.logToFile;
-        this.logTruncationAt = builder.logTruncationAt;
-        this.maxConcurrentFlushes = builder.maxConcurrentFlushes;
-        this.raiseOpenFileLimit = builder.raiseOpenFileLimit;
-        this.cancelBackgroundWorkOnClose = builder.cancelBackgroundWorkOnClose;
-        this.finishCompactionsOnClose = builder.finishCompactionsOnClose;
-        this.unifiedMemtable = builder.unifiedMemtable;
-        this.unifiedMemtableWriteBufferSize = builder.unifiedMemtableWriteBufferSize;
-        this.unifiedMemtableSkipListMaxLevel = builder.unifiedMemtableSkipListMaxLevel;
-        this.unifiedMemtableSkipListProbability = builder.unifiedMemtableSkipListProbability;
-        this.unifiedMemtableSyncMode = builder.unifiedMemtableSyncMode;
-        this.unifiedMemtableSyncIntervalUs = builder.unifiedMemtableSyncIntervalUs;
-        this.objectStoreFsPath = builder.objectStoreFsPath;
-        this.objectStoreConfig = builder.objectStoreConfig;
-        this.objectStoreS3Config = builder.objectStoreS3Config;
-        this.writeBufferSize = builder.writeBufferSize;
-        this.compressionAlgorithm = builder.compressionAlgorithm;
-        this.enableBloomFilter = builder.enableBloomFilter;
-        this.bloomFPR = builder.bloomFPR;
-        this.enableBlockIndexes = builder.enableBlockIndexes;
-        this.indexSampleRatio = builder.indexSampleRatio;
-        this.blockIndexPrefixLen = builder.blockIndexPrefixLen;
-        this.syncMode = builder.syncMode;
-        this.syncIntervalUs = builder.syncIntervalUs;
-        this.useBtree = builder.useBtree;
-        this.minLevels = builder.minLevels;
-        this.levelSizeRatio = builder.levelSizeRatio;
-        this.skipListMaxLevel = builder.skipListMaxLevel;
-        this.skipListProbability = builder.skipListProbability;
-        this.defaultIsolationLevel = builder.defaultIsolationLevel;
-        this.klogValueThreshold = builder.klogValueThreshold;
-        this.l0QueueStallThreshold = builder.l0QueueStallThreshold;
-        this.l1FileCountTrigger = builder.l1FileCountTrigger;
-        this.dividingLevelOffset = builder.dividingLevelOffset;
-        this.minDiskSpace = builder.minDiskSpace;
-        this.comparatorName = builder.comparatorName;
-        this.tombstoneDensityTrigger = builder.tombstoneDensityTrigger;
-        this.tombstoneDensityMinEntries = builder.tombstoneDensityMinEntries;
-        this.objectLazyCompaction = builder.objectLazyCompaction;
-        this.objectPrefetchCompaction = builder.objectPrefetchCompaction;
+        this.databaseConfig = builder.db.build();
+        this.columnFamilyConfig = builder.cf.build();
         this.columnFamilyName = builder.columnFamilyName;
         this.defaultTtlSeconds = builder.defaultTtlSeconds;
+        this.raiseOpenFileLimit = builder.raiseOpenFileLimit;
     }
 
+    /**
+     * Returns a builder starting from the native defaults.
+     *
+     * @return a new builder
+     */
     public static Builder builder() {
         return new Builder();
     }
 
-    /** Returns a config with sensible defaults for Kafka Streams workloads */
+    /**
+     * Returns a configuration carrying the native defaults plus LZ4
+     * compression.
+     *
+     * @return the default configuration
+     */
     public static TidesDBStoreConfig defaultConfig() {
         return builder().build();
     }
 
-    // Database-level getters
-    public int getNumFlushThreads() { return numFlushThreads; }
-    public int getNumCompactionThreads() { return numCompactionThreads; }
-    public LogLevel getLogLevel() { return logLevel; }
-    public long getBlockCacheSize() { return blockCacheSize; }
-    public long getMaxOpenSSTables() { return maxOpenSSTables; }
-    public long getMaxMemoryUsage() { return maxMemoryUsage; }
-    public boolean isLogToFile() { return logToFile; }
-    public long getLogTruncationAt() { return logTruncationAt; }
-    public int getMaxConcurrentFlushes() { return maxConcurrentFlushes; }
-    public long getRaiseOpenFileLimit() { return raiseOpenFileLimit; }
-    public boolean isCancelBackgroundWorkOnClose() { return cancelBackgroundWorkOnClose; }
-    public boolean isFinishCompactionsOnClose() { return finishCompactionsOnClose; }
+    /**
+     * Returns the database configuration with {@code dbPath} applied, ready to
+     * pass to {@link com.tidesdb.TidesDB#open(Config)}.
+     *
+     * @param dbPath the directory the database lives in
+     * @return the database configuration for that path
+     */
+    public Config toDatabaseConfig(String dbPath) {
+        return databaseConfig.toBuilder().dbPath(dbPath).build();
+    }
 
-    // Unified memtable getters
-    public boolean isUnifiedMemtable() { return unifiedMemtable; }
-    public long getUnifiedMemtableWriteBufferSize() { return unifiedMemtableWriteBufferSize; }
-    public int getUnifiedMemtableSkipListMaxLevel() { return unifiedMemtableSkipListMaxLevel; }
-    public float getUnifiedMemtableSkipListProbability() { return unifiedMemtableSkipListProbability; }
-    public int getUnifiedMemtableSyncMode() { return unifiedMemtableSyncMode; }
-    public long getUnifiedMemtableSyncIntervalUs() { return unifiedMemtableSyncIntervalUs; }
+    /**
+     * Returns the database configuration. Its path is a placeholder; the store
+     * substitutes the task state directory when it opens.
+     *
+     * @return the database configuration
+     */
+    public Config getDatabaseConfig() {
+        return databaseConfig;
+    }
 
-    // Object store getters
-    public String getObjectStoreFsPath() { return objectStoreFsPath; }
-    public ObjectStoreConfig getObjectStoreConfig() { return objectStoreConfig; }
-    public S3Config getObjectStoreS3Config() { return objectStoreS3Config; }
+    /**
+     * Returns the configuration the store's column family is created with.
+     *
+     * @return the column family configuration
+     */
+    public ColumnFamilyConfig getColumnFamilyConfig() {
+        return columnFamilyConfig;
+    }
 
-    // Column family getters
-    public long getWriteBufferSize() { return writeBufferSize; }
-    public CompressionAlgorithm getCompressionAlgorithm() { return compressionAlgorithm; }
-    public boolean isEnableBloomFilter() { return enableBloomFilter; }
-    public double getBloomFPR() { return bloomFPR; }
-    public boolean isEnableBlockIndexes() { return enableBlockIndexes; }
-    public int getIndexSampleRatio() { return indexSampleRatio; }
-    public int getBlockIndexPrefixLen() { return blockIndexPrefixLen; }
-    public SyncMode getSyncMode() { return syncMode; }
-    public long getSyncIntervalUs() { return syncIntervalUs; }
-    public boolean isUseBtree() { return useBtree; }
-    public int getMinLevels() { return minLevels; }
-    public long getLevelSizeRatio() { return levelSizeRatio; }
-    public int getSkipListMaxLevel() { return skipListMaxLevel; }
-    public float getSkipListProbability() { return skipListProbability; }
-    public IsolationLevel getDefaultIsolationLevel() { return defaultIsolationLevel; }
-    public long getKlogValueThreshold() { return klogValueThreshold; }
-    public int getL0QueueStallThreshold() { return l0QueueStallThreshold; }
-    public int getL1FileCountTrigger() { return l1FileCountTrigger; }
-    public int getDividingLevelOffset() { return dividingLevelOffset; }
-    public long getMinDiskSpace() { return minDiskSpace; }
-    public String getComparatorName() { return comparatorName; }
-    public double getTombstoneDensityTrigger() { return tombstoneDensityTrigger; }
-    public long getTombstoneDensityMinEntries() { return tombstoneDensityMinEntries; }
-    public boolean isObjectLazyCompaction() { return objectLazyCompaction; }
-    public boolean isObjectPrefetchCompaction() { return objectPrefetchCompaction; }
+    /**
+     * Returns the name of the column family the store reads and writes.
+     *
+     * @return the column family name
+     */
+    public String getColumnFamilyName() {
+        return columnFamilyName;
+    }
 
-    // Store behavior getters
-    public String getColumnFamilyName() { return columnFamilyName; }
-    public long getDefaultTtlSeconds() { return defaultTtlSeconds; }
+    /**
+     * Returns the TTL applied to every {@code put}, in seconds from the write,
+     * or a value {@code <= 0} for no expiry.
+     *
+     * @return the default TTL in seconds
+     */
+    public long getDefaultTtlSeconds() {
+        return defaultTtlSeconds;
+    }
 
+    /**
+     * Returns the open-file ceiling the store asks for before opening, or
+     * {@code 0} to leave the process limit alone.
+     *
+     * @return the requested open-file ceiling
+     */
+    public long getRaiseOpenFileLimit() {
+        return raiseOpenFileLimit;
+    }
+
+    /**
+     * Returns the isolation level the store's own transactions run at, which is
+     * the column family's default isolation level.
+     *
+     * @return the isolation level
+     */
+    public IsolationLevel getDefaultIsolationLevel() {
+        return columnFamilyConfig.getDefaultIsolationLevel();
+    }
+
+    @Override
+    public String toString() {
+        return "TidesDBStoreConfig{" +
+            "columnFamilyName='" + columnFamilyName + '\'' +
+            ", defaultTtlSeconds=" + defaultTtlSeconds +
+            ", raiseOpenFileLimit=" + raiseOpenFileLimit +
+            ", databaseConfig=" + databaseConfig +
+            ", columnFamilyConfig=" + columnFamilyConfig +
+            '}';
+    }
+
+    /**
+     * Builder for {@link TidesDBStoreConfig}. Every setter overrides one field
+     * of the native defaults; anything not set keeps the engine's value.
+     */
     public static class Builder {
-        // Database defaults tuned for Kafka Streams
-        private int numFlushThreads = 2;
-        private int numCompactionThreads = 2;
-        private LogLevel logLevel = LogLevel.INFO;
-        private long blockCacheSize = 64 * 1024 * 1024; // 64MB
-        private long maxOpenSSTables = 256;
-        private long maxMemoryUsage = 0; // auto
-        private boolean logToFile = false;
-        private long logTruncationAt = 24 * 1024 * 1024; // 24MB
-        private int maxConcurrentFlushes = 0; // 0 = library default
-        private long raiseOpenFileLimit = 0; // 0 = leave process open-file ceiling untouched
-        private boolean cancelBackgroundWorkOnClose = false; // true = fast shutdown
-        private boolean finishCompactionsOnClose = false; // false = cancel in-flight compactions at next checkpoint on close
 
-        // Unified memtable defaults
-        private boolean unifiedMemtable = false;
-        private long unifiedMemtableWriteBufferSize = 0; // auto
-        private int unifiedMemtableSkipListMaxLevel = 0; // default 12
-        private float unifiedMemtableSkipListProbability = 0; // default 0.25
-        private int unifiedMemtableSyncMode = 0; // SYNC_NONE
-        private long unifiedMemtableSyncIntervalUs = 0; // default
+        private Config.Builder db;
+        private ColumnFamilyConfig.Builder cf;
+        private String columnFamilyName = DEFAULT_COLUMN_FAMILY_NAME;
+        private long defaultTtlSeconds = 0;
+        private long raiseOpenFileLimit = 0;
 
-        // Object store defaults
-        private String objectStoreFsPath = null; // null = local only
-        private ObjectStoreConfig objectStoreConfig = null; // null = use defaults
-        private S3Config objectStoreS3Config = null; // null = no S3 backend
+        Builder() {
+            this.db = Config.defaultConfig(UNSET_PATH).toBuilder();
+            this.cf = ColumnFamilyConfig.builder().compression(CompressionAlgorithm.LZ4);
+        }
 
-        // Column family defaults
-        private long writeBufferSize = 64 * 1024 * 1024; // 64MB
-        private CompressionAlgorithm compressionAlgorithm = CompressionAlgorithm.LZ4_COMPRESSION;
-        private boolean enableBloomFilter = true;
-        private double bloomFPR = 0.01;
-        private boolean enableBlockIndexes = true;
-        private int indexSampleRatio = 1;
-        private int blockIndexPrefixLen = 16;
-        private SyncMode syncMode = SyncMode.SYNC_NONE;
-        private long syncIntervalUs = 128000;
-        private boolean useBtree = false;
-        private int minLevels = 5;
-        private long levelSizeRatio = 10;
-        private int skipListMaxLevel = 12;
-        private float skipListProbability = 0.25f;
-        private IsolationLevel defaultIsolationLevel = IsolationLevel.READ_COMMITTED;
-        private long klogValueThreshold = 512;
-        private int l0QueueStallThreshold = 20;
-        private int l1FileCountTrigger = 4;
-        private int dividingLevelOffset = 2;
-        private long minDiskSpace = 100 * 1024 * 1024; // 100MB
-        private String comparatorName = ""; // empty = default memcmp
-        private double tombstoneDensityTrigger = 0.0; // 0.0 = disabled
-        private long tombstoneDensityMinEntries = 1024;
-        private boolean objectLazyCompaction = false;
-        private boolean objectPrefetchCompaction = true;
-
-        // Store behavior
-        private String columnFamilyName = "default";
-        private long defaultTtlSeconds = -1; // no TTL
-
-        public Builder numFlushThreads(int n) { this.numFlushThreads = n; return this; }
-        public Builder numCompactionThreads(int n) { this.numCompactionThreads = n; return this; }
-        public Builder logLevel(LogLevel level) { this.logLevel = level; return this; }
-        public Builder blockCacheSize(long bytes) { this.blockCacheSize = bytes; return this; }
-        public Builder maxOpenSSTables(long n) { this.maxOpenSSTables = n; return this; }
-        public Builder maxMemoryUsage(long bytes) { this.maxMemoryUsage = bytes; return this; }
-        public Builder logToFile(boolean enable) { this.logToFile = enable; return this; }
-        public Builder logTruncationAt(long bytes) { this.logTruncationAt = bytes; return this; }
-        public Builder maxConcurrentFlushes(int n) { this.maxConcurrentFlushes = n; return this; }
+        /* ===== whole configurations ===== */
 
         /**
-         * Raise this process's open-file ceiling toward {@code desired} descriptors before the
-         * database opens, letting the engine keep more sstables open. Applied via
-         * {@code tidesdb_raise_open_file_limit} at init time, before open (the engine sizes
-         * max_open_sstables to fit the ceiling at open). 0 (default) leaves the limit untouched.
+         * Replaces the database configuration with {@code config}. Its path is
+         * ignored. Setters called after this one adjust the given configuration.
+         *
+         * @param config the database configuration; must not be {@code null}
+         * @return this builder
          */
-        public Builder raiseOpenFileLimit(long desired) { this.raiseOpenFileLimit = desired; return this; }
+        public Builder databaseConfig(Config config) {
+            if (config == null) {
+                throw new IllegalArgumentException("Database config cannot be null");
+            }
+            this.db = config.toBuilder().dbPath(UNSET_PATH);
+            return this;
+        }
 
         /**
-         * When true, cancel background compaction db-wide right before close for a fast shutdown.
-         * In-flight merges bail safely and queued compaction is skipped; flushes are unaffected so
-         * durability is preserved. Default false.
+         * Replaces the column family configuration with {@code config}. Its name
+         * is ignored; use {@link #columnFamilyName(String)}. Setters called after
+         * this one adjust the given configuration.
+         *
+         * @param config the column family configuration; must not be {@code null}
+         * @return this builder
          */
-        public Builder cancelBackgroundWorkOnClose(boolean enable) { this.cancelBackgroundWorkOnClose = enable; return this; }
+        public Builder columnFamilyConfig(ColumnFamilyConfig config) {
+            if (config == null) {
+                throw new IllegalArgumentException("Column family config cannot be null");
+            }
+            this.cf = config.toBuilder();
+            return this;
+        }
+
+        /* ===== database settings ===== */
+
+        /** @see Config.Builder#numFlushThreads(int) */
+        public Builder numFlushThreads(int n) { db.numFlushThreads(n); return this; }
+
+        /** @see Config.Builder#numCompactionThreads(int) */
+        public Builder numCompactionThreads(int n) { db.numCompactionThreads(n); return this; }
+
+        /** @see Config.Builder#logLevel(LogLevel) */
+        public Builder logLevel(LogLevel level) { db.logLevel(level); return this; }
+
+        /** @see Config.Builder#logToFile(boolean) */
+        public Builder logToFile(boolean enable) { db.logToFile(enable); return this; }
+
+        /** @see Config.Builder#logTruncationAt(long) */
+        public Builder logTruncationAt(long bytes) { db.logTruncationAt(bytes); return this; }
+
+        /** @see Config.Builder#blockCacheSize(long) */
+        public Builder blockCacheSize(long bytes) { db.blockCacheSize(bytes); return this; }
+
+        /** @see Config.Builder#maxOpenSSTables(long) */
+        public Builder maxOpenSSTables(long n) { db.maxOpenSSTables(n); return this; }
 
         /**
-         * Controls how {@code close()} treats compactions that are still running. When false
-         * (default), close cancels in-flight compactions at their next checkpoint for a fast
-         * shutdown — the merge discards its uncommitted output and leaves inputs intact, so no
-         * data is lost (recovery handles a mid-merge state the same way). When true, close waits
-         * for in-flight compactions to run to completion before returning. Applied to the native
-         * database at open time. Distinct from {@link #cancelBackgroundWorkOnClose(boolean)}, which
-         * proactively cancels background work right before close.
+         * Sets the size the shared memtable grows to before it is flushed.
+         * Replaces the per-column-family {@code writeBufferSize} of 0.4.x, since
+         * TidesDB 10 has one memtable for the whole database.
+         *
+         * @see Config.Builder#memtableWriteBufferSize(long)
          */
-        public Builder finishCompactionsOnClose(boolean enable) { this.finishCompactionsOnClose = enable; return this; }
+        public Builder memtableWriteBufferSize(long bytes) { db.memtableWriteBufferSize(bytes); return this; }
 
-        public Builder unifiedMemtable(boolean enable) { this.unifiedMemtable = enable; return this; }
-        public Builder unifiedMemtableWriteBufferSize(long bytes) { this.unifiedMemtableWriteBufferSize = bytes; return this; }
-        public Builder unifiedMemtableSkipListMaxLevel(int n) { this.unifiedMemtableSkipListMaxLevel = n; return this; }
-        public Builder unifiedMemtableSkipListProbability(float p) { this.unifiedMemtableSkipListProbability = p; return this; }
-        public Builder unifiedMemtableSyncMode(int mode) { this.unifiedMemtableSyncMode = mode; return this; }
-        public Builder unifiedMemtableSyncIntervalUs(long us) { this.unifiedMemtableSyncIntervalUs = us; return this; }
+        /** @see Config.Builder#memtableSkipListMaxLevel(int) */
+        public Builder memtableSkipListMaxLevel(int n) { db.memtableSkipListMaxLevel(n); return this; }
 
-        public Builder objectStoreFsPath(String path) { this.objectStoreFsPath = path; return this; }
-        public Builder objectStoreConfig(ObjectStoreConfig config) { this.objectStoreConfig = config; return this; }
+        /** @see Config.Builder#memtableSkipListProbability(float) */
+        public Builder memtableSkipListProbability(float p) { db.memtableSkipListProbability(p); return this; }
 
         /**
-         * Back the state store with an S3-compatible object store (AWS S3, MinIO, etc.). Takes
-         * precedence over {@link #objectStoreFsPath(String)}. Pair with
-         * {@link #objectStoreConfig(ObjectStoreConfig)} to tune cache, multipart, and replication
-         * behavior. Requires the native TidesDB library to be built with {@code TIDESDB_WITH_S3=ON};
-         * otherwise the store fails to open with a clear error.
+         * Sets how the write-ahead log is synced. Kafka Streams can rebuild a
+         * store from its changelog, so the default {@link SyncMode#SYNC_NONE} is
+         * usually right; {@link TidesDBStore#flush()} forces a sync at every
+         * Kafka commit regardless.
+         *
+         * @see Config.Builder#memtableSyncMode(SyncMode)
          */
-        public Builder objectStoreS3Config(S3Config config) { this.objectStoreS3Config = config; return this; }
+        public Builder memtableSyncMode(SyncMode mode) { db.memtableSyncMode(mode); return this; }
 
-        public Builder writeBufferSize(long bytes) { this.writeBufferSize = bytes; return this; }
-        public Builder compressionAlgorithm(CompressionAlgorithm algo) { this.compressionAlgorithm = algo; return this; }
-        public Builder enableBloomFilter(boolean enable) { this.enableBloomFilter = enable; return this; }
-        public Builder bloomFPR(double fpr) { this.bloomFPR = fpr; return this; }
-        public Builder enableBlockIndexes(boolean enable) { this.enableBlockIndexes = enable; return this; }
-        public Builder indexSampleRatio(int ratio) { this.indexSampleRatio = ratio; return this; }
-        public Builder blockIndexPrefixLen(int len) { this.blockIndexPrefixLen = len; return this; }
-        public Builder syncMode(SyncMode mode) { this.syncMode = mode; return this; }
-        public Builder syncIntervalUs(long us) { this.syncIntervalUs = us; return this; }
-        public Builder useBtree(boolean enable) { this.useBtree = enable; return this; }
-        public Builder minLevels(int n) { this.minLevels = n; return this; }
-        public Builder levelSizeRatio(long ratio) { this.levelSizeRatio = ratio; return this; }
-        public Builder skipListMaxLevel(int n) { this.skipListMaxLevel = n; return this; }
-        public Builder skipListProbability(float p) { this.skipListProbability = p; return this; }
-        public Builder defaultIsolationLevel(IsolationLevel level) { this.defaultIsolationLevel = level; return this; }
-        public Builder klogValueThreshold(long bytes) { this.klogValueThreshold = bytes; return this; }
-        public Builder l0QueueStallThreshold(int n) { this.l0QueueStallThreshold = n; return this; }
-        public Builder l1FileCountTrigger(int n) { this.l1FileCountTrigger = n; return this; }
-        public Builder dividingLevelOffset(int n) { this.dividingLevelOffset = n; return this; }
-        public Builder minDiskSpace(long bytes) { this.minDiskSpace = bytes; return this; }
-        public Builder comparatorName(String name) { this.comparatorName = name; return this; }
-        public Builder tombstoneDensityTrigger(double trigger) { this.tombstoneDensityTrigger = trigger; return this; }
-        public Builder tombstoneDensityMinEntries(long entries) { this.tombstoneDensityMinEntries = entries; return this; }
-        public Builder objectLazyCompaction(boolean enable) { this.objectLazyCompaction = enable; return this; }
-        public Builder objectPrefetchCompaction(boolean enable) { this.objectPrefetchCompaction = enable; return this; }
+        /** @see Config.Builder#memtableSyncIntervalUs(long) */
+        public Builder memtableSyncIntervalUs(long us) { db.memtableSyncIntervalUs(us); return this; }
 
-        public Builder columnFamilyName(String name) { this.columnFamilyName = name; return this; }
-        public Builder defaultTtlSeconds(long seconds) { this.defaultTtlSeconds = seconds; return this; }
+        /** @see Config.Builder#memtableL0QueueStallThreshold(int) */
+        public Builder memtableL0QueueStallThreshold(int n) { db.memtableL0QueueStallThreshold(n); return this; }
 
+        /** @see Config.Builder#memtableIdleFlushSeconds(int) */
+        public Builder memtableIdleFlushSeconds(int seconds) { db.memtableIdleFlushSeconds(seconds); return this; }
+
+        /** @see Config.Builder#valueSeparationThreshold(long) */
+        public Builder valueSeparationThreshold(long bytes) { db.valueSeparationThreshold(bytes); return this; }
+
+        /** @see Config.Builder#vlogSegmentSize(long) */
+        public Builder vlogSegmentSize(long bytes) { db.vlogSegmentSize(bytes); return this; }
+
+        /** @see Config.Builder#txnTimeoutSeconds(long) */
+        public Builder txnTimeoutSeconds(long seconds) { db.txnTimeoutSeconds(seconds); return this; }
+
+        /* ===== column family settings ===== */
+
+        /**
+         * Sets a single-codec encoding pipeline. The store default is
+         * {@link CompressionAlgorithm#LZ4}; {@link CompressionAlgorithm#NONE}
+         * stores data verbatim.
+         *
+         * @see ColumnFamilyConfig.Builder#compression(CompressionAlgorithm)
+         */
+        public Builder compression(CompressionAlgorithm algorithm) { cf.compression(algorithm); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#encodingPipeline(CompressionAlgorithm...) */
+        public Builder encodingPipeline(CompressionAlgorithm... algorithms) { cf.encodingPipeline(algorithms); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#enableBloomFilter(boolean) */
+        public Builder enableBloomFilter(boolean enable) { cf.enableBloomFilter(enable); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#bloomFpr(double) */
+        public Builder bloomFpr(double fpr) { cf.bloomFpr(fpr); return this; }
+
+        /**
+         * Sets the isolation level the store's transactions run at.
+         *
+         * @see ColumnFamilyConfig.Builder#defaultIsolationLevel(IsolationLevel)
+         */
+        public Builder defaultIsolationLevel(IsolationLevel level) { cf.defaultIsolationLevel(level); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#levelSizeRatio(long) */
+        public Builder levelSizeRatio(long ratio) { cf.levelSizeRatio(ratio); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#minLevels(int) */
+        public Builder minLevels(int n) { cf.minLevels(n); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#dividingLevelOffset(int) */
+        public Builder dividingLevelOffset(int n) { cf.dividingLevelOffset(n); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#l1FileCountTrigger(int) */
+        public Builder l1FileCountTrigger(int n) { cf.l1FileCountTrigger(n); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#keepValuesInline(boolean) */
+        public Builder keepValuesInline(boolean enable) { cf.keepValuesInline(enable); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#btreeKlogBlockSize(long) */
+        public Builder btreeKlogBlockSize(long bytes) { cf.btreeKlogBlockSize(bytes); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#tombstoneDensityTrigger(double) */
+        public Builder tombstoneDensityTrigger(double trigger) { cf.tombstoneDensityTrigger(trigger); return this; }
+
+        /** @see ColumnFamilyConfig.Builder#tombstoneDensityMinEntries(long) */
+        public Builder tombstoneDensityMinEntries(long entries) { cf.tombstoneDensityMinEntries(entries); return this; }
+
+        /* ===== store behaviour ===== */
+
+        /**
+         * Sets the column family the store reads and writes. It is created on
+         * first open with the configured column family settings, and reused as
+         * it is on later opens.
+         *
+         * @param name the column family name; must not be {@code null} or empty
+         * @return this builder
+         */
+        public Builder columnFamilyName(String name) {
+            if (name == null || name.isEmpty()) {
+                throw new IllegalArgumentException("Column family name cannot be null or empty");
+            }
+            this.columnFamilyName = name;
+            return this;
+        }
+
+        /**
+         * Sets a TTL applied to every {@code put}, {@code putIfAbsent} and
+         * {@code putAll}, in seconds from the write. Zero or negative (the
+         * default) never expires.
+         *
+         * @param seconds how long each entry lives
+         * @return this builder
+         */
+        public Builder defaultTtlSeconds(long seconds) {
+            this.defaultTtlSeconds = seconds;
+            return this;
+        }
+
+        /**
+         * Raises this process's open-file ceiling toward {@code desired}
+         * descriptors before the database opens, so the engine can keep more
+         * SSTables open. The engine sizes its open-table cap to the ceiling at
+         * open time, which is why this is applied in {@code init}. Process-wide.
+         * {@code 0} (the default) leaves the limit untouched.
+         *
+         * @param desired the target descriptor count
+         * @return this builder
+         */
+        public Builder raiseOpenFileLimit(long desired) {
+            this.raiseOpenFileLimit = desired;
+            return this;
+        }
+
+        /**
+         * Builds the configuration.
+         *
+         * @return a new immutable configuration
+         */
         public TidesDBStoreConfig build() {
             return new TidesDBStoreConfig(this);
         }

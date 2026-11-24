@@ -31,15 +31,15 @@ jobs:
         # Clone and build TidesDB
         git clone --depth 1 https://github.com/tidesdb/tidesdb.git /tmp/tidesdb
         cd /tmp/tidesdb
-        cmake -S . -B build
+        cmake -S . -B build -DTIDESDB_BUILD_TESTS=OFF
         cmake --build build
         sudo cmake --install build
         sudo ldconfig
 
     - name: Build and install TidesDB Java library
       run: |
-        # Get latest version
-        TIDESDB_JAVA_VERSION=$(curl -s https://api.github.com/repos/tidesdb/tidesdb-java/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+        # the binding version this plugin compiles against, read from the pom
+        TIDESDB_JAVA_VERSION=$(sed -n 's:.*<tidesdb.version>\(.*\)</tidesdb.version>.*:\1:p' pom.xml)
         
         # Clone and build tidesdb-java
         git clone --depth 1 --branch "v${TIDESDB_JAVA_VERSION}" https://github.com/tidesdb/tidesdb-java.git /tmp/tidesdb-java

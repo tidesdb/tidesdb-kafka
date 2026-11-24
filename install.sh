@@ -4,7 +4,7 @@ set -e
 # TidesDB Kafka Streams Plugin Installer
 # This script installs TidesDB native library and Kafka Streams plugin
 
-VERSION="0.4.3"
+VERSION="0.5.0"
 
 # Source shared utilities
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,24 +13,29 @@ source "${SCRIPT_DIR}/utils.sh"
 print_box "" "TidesDB Kafka Streams Plugin Installer" "Version: $VERSION"
 echo
 
-# Fetch latest versions from GitHub
-echo "Fetching latest TidesDB versions..."
+# The binding version is the one this plugin's pom compiles against, not the latest release:
+# a newer binding may not be API-compatible. The core library is the latest release, which
+# must be 10.2.0 or newer for tidesdb-java 1.1.x.
+TIDESDB_JAVA_VERSION=$(sed -n 's:.*<tidesdb.version>\(.*\)</tidesdb.version>.*:\1:p' "${SCRIPT_DIR}/pom.xml")
+TIDESDB_CORE_FALLBACK="10.2.1"
 
+echo "Fetching latest TidesDB core version..."
 if command -v curl &> /dev/null; then
     TIDESDB_CORE_VERSION=$(curl -s https://api.github.com/repos/tidesdb/tidesdb/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    TIDESDB_JAVA_VERSION=$(curl -s https://api.github.com/repos/tidesdb/tidesdb-java/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
 elif command -v wget &> /dev/null; then
     TIDESDB_CORE_VERSION=$(wget -qO- https://api.github.com/repos/tidesdb/tidesdb/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-    TIDESDB_JAVA_VERSION=$(wget -qO- https://api.github.com/repos/tidesdb/tidesdb-java/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
 else
     echo "Neither curl nor wget found. Please install one of them."
     exit 1
 fi
 
-if [ -z "$TIDESDB_CORE_VERSION" ] || [ -z "$TIDESDB_JAVA_VERSION" ]; then
-    echo "Failed to fetch latest versions. Using fallback versions..."
-    TIDESDB_CORE_VERSION="9.3.6"
-    TIDESDB_JAVA_VERSION="0.8.3"
+if [ -z "$TIDESDB_CORE_VERSION" ]; then
+    echo "Failed to fetch the latest version. Using fallback v${TIDESDB_CORE_FALLBACK}..."
+    TIDESDB_CORE_VERSION="$TIDESDB_CORE_FALLBACK"
+fi
+if [ -z "$TIDESDB_JAVA_VERSION" ]; then
+    echo "Could not read tidesdb.version from pom.xml"
+    exit 1
 fi
 
 echo "✓ TidesDB Core: v$TIDESDB_CORE_VERSION"
@@ -131,20 +136,18 @@ fi
 echo "   Configuring with CMake..."
 mkdir -p build
 cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release -DTIDESDB_BUILD_TESTS=OFF
 
 echo "   Building..."
 make -j$(nproc 2>/dev/null || echo 2)
 
-echo "   Installing library..."
+# installs the library with its versioned names and the headers the JNI build needs
+echo "   Installing library and headers..."
+sudo cmake --install .
 if [ "$OS" = "Linux" ]; then
-    sudo cp libtidesdb.so /usr/local/lib/
     sudo ldconfig
-    echo "✓ TidesDB library installed to /usr/local/lib/libtidesdb.so"
-elif [ "$OS" = "Darwin" ]; then
-    sudo cp libtidesdb.dylib /usr/local/lib/
-    echo "✓ TidesDB library installed to /usr/local/lib/libtidesdb.dylib"
 fi
+echo "✓ TidesDB library installed to /usr/local"
 
 cd "$SCRIPT_DIR"
 rm -rf "$TEMP_DIR"

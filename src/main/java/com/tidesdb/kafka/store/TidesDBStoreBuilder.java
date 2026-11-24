@@ -1,9 +1,5 @@
 package com.tidesdb.kafka.store;
 
-import com.tidesdb.*;
-import org.apache.kafka.common.serialization.Serde;
-import org.apache.kafka.common.utils.Bytes;
-import org.apache.kafka.streams.processor.StateStore;
 import org.apache.kafka.streams.state.StoreBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,20 +7,25 @@ import org.slf4j.LoggerFactory;
 import java.util.Map;
 
 /**
- * Builder for creating TidesDB-backed state stores in Kafka Streams.
- * 
- * Usage:
- * <pre>
- * StoreBuilder<KeyValueStore<String, Long>> storeBuilder = 
- *     new TidesDBStoreBuilder("my-store")
- *         .withConfig(TidesDBStoreConfig.builder()
- *             .compressionAlgorithm(CompressionAlgorithm.ZSTD_COMPRESSION)
- *             .enableBloomFilter(true)
- *             .syncMode(SyncMode.SYNC_NONE)
- *             .build())
+ * Builds a bare {@link TidesDBStore}, a {@code Bytes}/{@code byte[]} store
+ * with no Kafka Streams wrapping.
+ *
+ * <p><strong>This builder does not add change-logging or caching.</strong>
+ * {@link #withLoggingEnabled(Map)} and {@link #withCachingEnabled()} only record
+ * the request, so a changelog topic would be created that nothing writes to.
+ * For a store Kafka Streams can restore after a failover, let Kafka build the
+ * wrappers around {@link TidesDBStoreSupplier}:
+ * <pre>{@code
+ * StoreBuilder<KeyValueStore<String, Long>> storeBuilder =
+ *     Stores.keyValueStoreBuilder(
+ *             new TidesDBStoreSupplier("my-store", TidesDBStoreConfig.builder()
+ *                 .compression(CompressionAlgorithm.ZSTD)
+ *                 .build()),
+ *             Serdes.String(), Serdes.Long())
  *         .withCachingEnabled()
  *         .withLoggingEnabled(Collections.emptyMap());
- * </pre>
+ * }</pre>
+ * or pass the supplier to {@code Materialized.as(...)} in the DSL.
  */
 public class TidesDBStoreBuilder implements StoreBuilder<TidesDBStore> {
     private static final Logger log = LoggerFactory.getLogger(TidesDBStoreBuilder.class);
@@ -83,9 +84,12 @@ public class TidesDBStoreBuilder implements StoreBuilder<TidesDBStore> {
 
     @Override
     public TidesDBStore build() {
-        log.info("Building TidesDB store '{}' (caching={}, logging={}, compression={}, syncMode={})", 
-                 name, enableCaching, enableLogging,
-                 storeConfig.getCompressionAlgorithm(), storeConfig.getSyncMode());
+        if (enableLogging || enableCaching) {
+            log.warn("TidesDBStoreBuilder '{}' builds a bare store: change-logging and caching are "
+                + "not applied. Use Stores.keyValueStoreBuilder(new TidesDBStoreSupplier(...), "
+                + "keySerde, valueSerde) or Materialized.as(supplier) instead.", name);
+        }
+        log.debug("Building TidesDB store '{}' with {}", name, storeConfig);
         return new TidesDBStore(name, storeConfig);
     }
 

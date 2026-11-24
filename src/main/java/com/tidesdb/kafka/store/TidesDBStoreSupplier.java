@@ -5,25 +5,35 @@ import org.apache.kafka.streams.state.KeyValueBytesStoreSupplier;
 import org.apache.kafka.streams.state.KeyValueStore;
 
 /**
- * Supplier for TidesDB-backed KeyValue stores in Kafka Streams.
- * 
- * Usage with Materialized:
- * <pre>
+ * Supplies TidesDB-backed key-value stores to Kafka Streams. Kafka wraps each
+ * store it gets from here with change-logging, caching and metrics, as it does
+ * RocksDB's.
+ *
+ * <p>With the DSL:
+ * <pre>{@code
  * builder.stream("input")
  *     .groupByKey()
  *     .count(Materialized.as(new TidesDBStoreSupplier("my-store")));
- * </pre>
- * 
- * Usage with custom config:
- * <pre>
+ * }</pre>
+ *
+ * <p>With a custom configuration:
+ * <pre>{@code
  * TidesDBStoreConfig config = TidesDBStoreConfig.builder()
- *     .compressionAlgorithm(CompressionAlgorithm.ZSTD_COMPRESSION)
- *     .syncMode(SyncMode.SYNC_NONE)
+ *     .compression(CompressionAlgorithm.ZSTD)
+ *     .blockCacheSize(256L * 1024 * 1024)
  *     .build();
  * builder.stream("input")
  *     .groupByKey()
  *     .count(Materialized.as(new TidesDBStoreSupplier("my-store", config)));
- * </pre>
+ * }</pre>
+ *
+ * <p>With the Processor API:
+ * <pre>{@code
+ * topology.addStateStore(
+ *     Stores.keyValueStoreBuilder(new TidesDBStoreSupplier("my-store"),
+ *                                 Serdes.String(), Serdes.Long()),
+ *     "my-processor");
+ * }</pre>
  */
 public class TidesDBStoreSupplier implements KeyValueBytesStoreSupplier {
 
